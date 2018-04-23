@@ -1,0 +1,14 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+# Disclaimer
+- this code is forked from https://www.kaggle.com/pranav84/talkingdata-eda-to-model-evaluation-lb-0-9683/data
+
+```{r libraries}
+
+
+```
+
