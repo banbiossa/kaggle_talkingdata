@@ -8,7 +8,263 @@ output: html_notebook
 - this code is forked from https://www.kaggle.com/pranav84/talkingdata-eda-to-model-evaluation-lb-0-9683/data
 
 ```{r libraries}
+if (!require("pacman")) install.packages("pacman")
 
+pacman::p_load(knitr, tidyverse, highcharter, data.table, lubridate, pROC, tictoc, DescTools, lightgbm)
+set.seed(84)               
+options(scipen = 9999, warn = -1, digits= 5)
+
+```
+
+# Paramters
+```{r parameters}
+train_file = "../data/train_sample.csv"
+test_file= "../data/test.csv"
+nrows_to_test = 100000
+
+```
+
+
+```{r load data}
+tic("Total time for processing")
+train = fread(train_file, 
+              col.names = c("ip", "app", "device", "os", "channel", "click_time",
+                            "attributed_time", "is_attributed"), ,
+              showProgress = FALSE) %>%
+        select(-attributed_time) %>%
+        mutate(wday = Weekday(click_time), hour = hour(click_time)) %>%
+        select(-click_time) %>%
+        add_count(ip, wday, hour) %>% rename("nip_day_h" = n) %>%
+        add_count(ip, hour, channel) %>% rename("nip_h_chan" = n) %>%
+        add_count(ip, hour, os) %>% rename("nip_h_osr" = n) %>%
+        add_count(ip, hour, app) %>% rename("nip_h_app" = n) %>%
+        add_count(ip, hour, device) %>% rename("nip_h_dev" = n) %>%
+        select(-c(ip))
+
+toc()
+```
+
+```{r load test}
+tic("Total time for processing")
+test = fread(test_file, showProgress = FALSE, nrows = nrows_to_test) 
+
+# extract click_id for submission file
+sub = data.table(click_id = test$click_id, is_attributed = NA)
+
+test = test %>%
+        mutate(wday = Weekday(click_time), hour = hour(click_time)) %>%
+        select(-click_time) %>%
+        add_count(ip, wday, hour) %>% rename("nip_day_h" = n) %>%
+        add_count(ip, hour, channel) %>% rename("nip_h_chan" = n) %>%
+        add_count(ip, hour, os) %>% rename("nip_h_osr" = n) %>%
+        add_count(ip, hour, app) %>% rename("nip_h_app" = n) %>%
+        add_count(ip, hour, device) %>% rename("nip_h_dev" = n) %>%
+        select(-c(ip))
+
+toc()
+
+```
+
+# Data Analysis
+```{r eda}
+str(train)
+
+```
+
+```{r kable}
+?kable
+kable(as.data.frame(lapply(train, function(x) length(unique(x)))))
+
+kable(as.data.frame(lapply(test, function(x) length(unique(x)))))
+```
+
+## Categorical features
+```{r plot categorical features}
+h1 = train %>% group_by(app) %>% summarise(count = n()) %>%
+        arrange(desc(count)) %>% head(15) %>% mutate(app = as.character(app)) %>%
+        hchart("bar", hcaes(x=app, y = count, color = -count)) %>%
+        hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Apps")
+
+h2 <- train %>% group_by(os) %>% summarise(count = n()) %>% 
+  arrange(desc(count)) %>% head(15) %>% mutate(os = as.character(os)) %>%
+  hchart("bar", hcaes(x = os, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top OS")
+
+h3 <- train %>% group_by(channel) %>% summarise(count = n()) %>% 
+  arrange(desc(count)) %>% head(15) %>% mutate(channel = as.character(channel)) %>%
+  hchart("bar", hcaes(x = channel, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Channels")
+
+h4 <- train %>% group_by(device) %>% summarise(count = n()) %>% 
+  arrange(desc(count)) %>% head(15) %>% mutate(device = as.character(device)) %>%
+  hchart("bar", hcaes(x = device, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Devices")
+
+h5 <- train %>% group_by(hour) %>% summarise(count = n()) %>%
+  arrange(desc(count)) %>% head(15) %>% mutate(hour = as.character(hour)) %>%
+  hchart("bar", hcaes(x = hour, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Hours")
+
+hw_grid(h1, h2, h3, h4, h5, ncol = 5, rowheight = 600)
+
+```
+
+
+```{r}
+?hchart
+
+```
+
+
+# Test Data
+```{r test data}
+h1 <- test %>% group_by(app) %>% summarise(count = n()) %>% 
+  arrange(desc(count)) %>% head(15) %>% mutate(app = as.character(app)) %>%
+  hchart("bar", hcaes(x = app, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Apps")
+
+h2 <- test %>% group_by(os) %>% summarise(count = n()) %>% 
+  arrange(desc(count)) %>% head(15) %>% mutate(os = as.character(os)) %>%
+  hchart("bar", hcaes(x = os, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top OS")
+
+h3 <- test %>% group_by(channel) %>% summarise(count = n()) %>% 
+  arrange(desc(count)) %>% head(15) %>% mutate(channel = as.character(channel)) %>%
+  hchart("bar", hcaes(x = channel, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Channels")
+
+h4 <- test %>% group_by(device) %>% summarise(count = n()) %>% 
+  arrange(desc(count)) %>% head(15) %>% mutate(device = as.character(device)) %>%
+  hchart("bar", hcaes(x = device, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Devices")
+
+h5 <- test %>% group_by(hour) %>% summarise(count = n()) %>%
+  arrange(desc(count)) %>% head(15) %>% mutate(hour = as.character(hour)) %>%
+  hchart("bar", hcaes(x = hour, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Hours")
+
+h6 <- train %>% group_by(wday) %>% summarise(count = n()) %>%
+  arrange(desc(count)) %>% mutate(wday = as.character(wday)) %>%
+  hchart("bar", hcaes(x = wday, y = count, color =-count)) %>%
+  hc_add_theme(hc_theme_ffx()) %>% hc_title(text = "Top Weekdays")
+
+hw_grid(h1, h2, h3, h4, h5, ncol = 5, rowheight = 600)
+
+```
+
+
+# Modelling 
+
+## Test train split
+```{r split}
+#time based split
+tr_index <- nrow(train)
+dtrain <- train %>% head(0.95 * tr_index) # 95% data for training
+dvalid <- train %>% tail(0.05 * tr_index) # 5% data for validation
+rm(train)
+cat("train size : ", dim(dtrain), " | valid size : ", dim(valid), " | test  size : ", dim(test))
+```
+
+```{r table}
+table(dtrain$is_attributed)
+
+```
+
+## Umbalancedness
+```{r umbalance}
+scale_pos_weight = 100 - ((220/100000)*100) # this will default in 50, as 50% of the data is positive
+scale_pos_weight = 94780/220
+
+```
+
+
+## Categorical data
+- light gbm uses these without breaking into one-hot coding
+
+```{r categorical}
+categorical_features = c("app", "device", "os", "channel", "wday", "hour")
+
+dtrain = lgb.Dataset(data = as.matrix(dtrain[, colnames(dtrain)!= "is_attributed"]),
+                     label = dtrain$is_attributed, 
+                     categorical_feature = categorical_features)
+
+dvalid = lgb.Dataset(data = as.matrix(dvalid[, colnames(dvalid)!= "is_attributed"]),
+                     label = dvalid$is_attributed, 
+                     categorical_feature = categorical_features)
+```
+
+## Parameter tuning
+```{r parameters for tuning}
+params = list(objective = "binary", 
+              metric = "auc", 
+              learning_rate = 0.1,
+              num_leaves = 7,
+              max_depth = 3,
+              min_child_samples = 100, 
+              max_bin = 100,
+              subsample = 0.7,
+              subsample_freq = 1,
+              colsample_bytree = 0.7,
+              min_child_weight = 0,
+              min_split_gain = 0,
+              scale_pos_weight = scale_pos_weight)
+
+```
+
+## Train
+```{r train}
+tic("Total time for model training")
+model = lgb.train(params, dtrain, valids = list(validation = dvalid), nthread = 4,
+                  nrounds = 1000, verbose = 1, early_stopping_rounds = 50, eval_freq = 50)
+toc()
+
+```
+
+
+```{r result}
+cat("Validation AUC @ best iter: ", 
+    max(unlist(model$record_evals[["validation"]][["auc"]][["eval"]])))
+
+```
+
+
+# Model evaluation
+## Feature importance
+```{r feature importance}
+fi = lgb.importance(model, percentage = TRUE)
+
+highchart() %>%
+        hc_title(text = "Feature importance by Gain") %>%
+        hc_xAxis(categories = fi$Feature) %>%
+        hc_add_series(name = "Gain", data = fi, type = "bar", hcaes(x = Feature, y = Gain)) %>%
+        hc_add_theme(hc_theme_ffx())
+
+```
+
+## Validation
+```{r ROC}
+valid = head(valid, 50000)
+val_preds = predict(model, data = as.matrix(valid[, colnames(valid)!="is_attributed"]), n = model$best_iter)
+
+
+roc(valid$is_attributed, val_preds, plot = TRUE, col = "steelblue", lwd = 3,
+    levels = base::levels(as.factor(valid$is_attributed)), grid = TRUE)
+
+```
+
+
+# Individual predictions
+
+```{r individual predictions}
+
+
+```
+
+
+
+
+# Submittion
+```{r submit}
 
 ```
 
