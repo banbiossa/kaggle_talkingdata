@@ -18,16 +18,18 @@ options(scipen = 9999, warn = -1, digits= 5)
 
 # Paramters
 ```{r parameters}
-train_file = "../data/train_sample.csv"
+train_file = "../data/train.csv"
 test_file= "../data/test.csv"
 nrows_to_test = 100000
+nrows_to_train = 6000000
+output_file = "../submit/sub_lightgbm_R_6mil_v2.csv"
 
 ```
 
 
 ```{r load data}
 tic("Total time for processing")
-train = fread(train_file, 
+train = fread(train_file, nrows = nrows_to_train,
               col.names = c("ip", "app", "device", "os", "channel", "click_time",
                             "attributed_time", "is_attributed"), ,
               showProgress = FALSE) %>%
@@ -161,9 +163,9 @@ hw_grid(h1, h2, h3, h4, h5, ncol = 5, rowheight = 600)
 #time based split
 tr_index <- nrow(train)
 dtrain <- train %>% head(0.95 * tr_index) # 95% data for training
-dvalid <- train %>% tail(0.05 * tr_index) # 5% data for validation
+valid <- train %>% tail(0.05 * tr_index) # 5% data for validation
 rm(train)
-cat("train size : ", dim(dtrain), " | valid size : ", dim(valid), " | test  size : ", dim(test))
+cat("train size : ", dim(dtrain), " | valid size : ", dim(dvalid), " | test  size : ", dim(test))
 ```
 
 ```{r table}
@@ -174,7 +176,7 @@ table(dtrain$is_attributed)
 ## Umbalancedness
 ```{r umbalance}
 scale_pos_weight = 100 - ((220/100000)*100) # this will default in 50, as 50% of the data is positive
-scale_pos_weight = 94780/220
+#scale_pos_weight = 94780/220
 
 ```
 
@@ -189,8 +191,8 @@ dtrain = lgb.Dataset(data = as.matrix(dtrain[, colnames(dtrain)!= "is_attributed
                      label = dtrain$is_attributed, 
                      categorical_feature = categorical_features)
 
-dvalid = lgb.Dataset(data = as.matrix(dvalid[, colnames(dvalid)!= "is_attributed"]),
-                     label = dvalid$is_attributed, 
+dvalid = lgb.Dataset(data = as.matrix(valid[, colnames(valid)!= "is_attributed"]),
+                     label = valid$is_attributed, 
                      categorical_feature = categorical_features)
 ```
 
@@ -276,7 +278,8 @@ lgb.plot.interpretation(tree_interpretation[[1]])
 preds = predict(model, data = as.matrix(test[, colnames(test)], n = model$best_iter))
 preds = as.data.frame(preds)
 sub$is_attributed = preds
-fwrite(sub, "../submit/sub_lightgbm_R_1lahk.csv")
+fwrite(sub, output_file)
 
 ```
+
 
