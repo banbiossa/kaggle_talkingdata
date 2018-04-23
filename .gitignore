@@ -1,6 +1,7 @@
 
 # Data files
 data/
+submit/
 
 # History files
 .Rhistory

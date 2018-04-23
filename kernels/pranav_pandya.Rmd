@@ -46,7 +46,8 @@ toc()
 
 ```{r load test}
 tic("Total time for processing")
-test = fread(test_file, showProgress = FALSE, nrows = nrows_to_test) 
+#test = fread(test_file, showProgress = FALSE, nrows = nrows_to_test) 
+test = fread(test_file, showProgress = FALSE)
 
 # extract click_id for submission file
 sub = data.table(click_id = test$click_id, is_attributed = NA)
@@ -256,15 +257,26 @@ roc(valid$is_attributed, val_preds, plot = TRUE, col = "steelblue", lwd = 3,
 # Individual predictions
 
 ```{r individual predictions}
+valid[1,]
+```
 
+```{r predicted value}
+paste("predicted value", val_preds[[1]])
 
 ```
 
+```{r reasoning}
+tree_interpretation = lgb.interprete(model, data = as.matrix(valid[, colnames(valid)]), 1)
+lgb.plot.interpretation(tree_interpretation[[1]])
 
-
+```
 
 # Submittion
 ```{r submit}
+preds = predict(model, data = as.matrix(test[, colnames(test)], n = model$best_iter))
+preds = as.data.frame(preds)
+sub$is_attributed = preds
+fwrite(sub, "../submit/sub_lightgbm_R_1lahk.csv")
 
 ```
 
