@@ -23,7 +23,7 @@ test_file= "../data/test.csv"
 nrows_to_test = 100000
 nrows_to_train = 10000000
 output_file = "../submit/sub_lightgbm_R_10mil_v1.csv"
-is_test = TRUE
+is_test = FALSE
 
 ```
 
@@ -171,19 +171,15 @@ hw_grid(h1, h2, h3, h4, h5, ncol = 5, rowheight = 600)
 
 
 # Modelling 
+```{r caret split}
+set.seed(3456)
+trainIndex = createDataPartition(training$is_attributed, p = .95, list = F)
+dtrain = training[trainIndex, ]
+valid = training[-trainIndex, ]
 
-## Test train split
-```{r split}
-#time based split
-tr_index <- nrow(train)
-dtrain <- train %>% head(0.95 * tr_index) # 95% data for training
-valid <- train %>% tail(0.05 * tr_index) # 5% data for validation
-rm(train)
-cat("train size : ", dim(dtrain), " | valid size : ", dim(valid), " | test  size : ", dim(test))
-
-
-
+cat("train size : ", dim(dtrain), " | valid size : ", dim(valid), " | test  size : ", dim(testing))
 ```
+
 
 ```{r table}
 table(dtrain$is_attributed)
@@ -287,7 +283,6 @@ paste("predicted value", val_preds[[1]])
 ```{r reasoning}
 tree_interpretation = lgb.interprete(model, data = as.matrix(valid[, colnames(valid)]), 1)
 lgb.plot.interpretation(tree_interpretation[[1]])
-
 ```
 
 # Submittion

@@ -22,7 +22,7 @@ train_file = "../data/train.csv"
 test_file= "../data/test.csv"
 nrows_to_test = 100000
 nrows_to_train = 10000000
-output_file = "../submit/sub_lightgbm_R_10mil_v1.csv"
+output_file = "../submit/lm_R_6mil_v1.csv"
 is_test = TRUE
 
 ```
@@ -31,21 +31,22 @@ is_test = TRUE
 ```{r load data}
 tic("Total time for processing")
 if(is_test){
-        train = fread(train_file, nrows = nrows_to_test,
+        training = fread(train_file, nrows = nrows_to_test,
                       col.names = c("ip", "app", "device", "os", "channel", "click_time",
                                     "attributed_time", "is_attributed"), ,
                       showProgress = FALSE) 
 }else{
-        train = fread(train_file, nrows = nrows_to_train,
+        training = fread(train_file, nrows = nrows_to_train,
                       col.names = c("ip", "app", "device", "os", "channel", "click_time",
                                     "attributed_time", "is_attributed"), ,
                       showProgress = FALSE) 
         
 }
 
-train = train %>%
+training = training %>%
         select(-attributed_time)%>%
         mutate(wday = Weekday(click_time), hour = hour(click_time)) %>%
+        mutate_all(as.factor) %>%
         select(-click_time) %>%
         add_count(ip, wday, hour) %>% rename("nip_day_h" = n) %>%
         add_count(ip, hour, channel) %>% rename("nip_h_chan" = n) %>%
@@ -55,21 +56,25 @@ train = train %>%
         select(-ip)
 
 toc()
+head(training)
 ```
+
+
 
 ```{r load test}
 tic("Total time for processing")
 if(is_test){
-        test = fread(test_file, showProgress = FALSE, nrows = nrows_to_test) 
+        testing = fread(test_file, showProgress = FALSE, nrows = nrows_to_test) 
 }else{
-        test = fread(test_file, showProgress = FALSE)
+        testing = fread(test_file, showProgress = FALSE)
 }
 
 # extract click_id for submission file
 sub = data.table(click_id = test$click_id, is_attributed = NA)
 
-test = test %>%
+testing = testing %>%
         mutate(wday = Weekday(click_time), hour = hour(click_time)) %>%
+        mutate_all(as.factor) %>%
         select(-click_time) %>%
         add_count(ip, wday, hour) %>% rename("nip_day_h" = n) %>%
         add_count(ip, hour, channel) %>% rename("nip_h_chan" = n) %>%
@@ -84,19 +89,18 @@ toc()
 
 # Data Analysis
 ```{r eda}
-str(train)
+str(training)
 
 ```
 
 ```{r kable}
 ?kable
-kable(as.data.frame(lapply(train, function(x) length(unique(x)))))
+kable(as.data.frame(lapply(training, function(x) length(unique(x)))))
 
-kable(as.data.frame(lapply(test, function(x) length(unique(x)))))
+kable(as.data.frame(lapply(testing, function(x) length(unique(x)))))
 ```
 
 ## Categorical features
-```{r plot categorical features}
 h1 = train %>% group_by(app) %>% summarise(count = n()) %>%
         arrange(desc(count)) %>% head(15) %>% mutate(app = as.character(app)) %>%
         hchart("bar", hcaes(x=app, y = count, color = -count)) %>%
@@ -124,8 +128,6 @@ h5 <- train %>% group_by(hour) %>% summarise(count = n()) %>%
 
 hw_grid(h1, h2, h3, h4, h5, ncol = 5, rowheight = 600)
 
-```
-
 
 ```{r}
 ?hchart
@@ -134,7 +136,6 @@ hw_grid(h1, h2, h3, h4, h5, ncol = 5, rowheight = 600)
 
 
 # Test Data
-```{r test data}
 h1 <- test %>% group_by(app) %>% summarise(count = n()) %>% 
   arrange(desc(count)) %>% head(15) %>% mutate(app = as.character(app)) %>%
   hchart("bar", hcaes(x = app, y = count, color =-count)) %>%
@@ -167,27 +168,29 @@ h6 <- train %>% group_by(wday) %>% summarise(count = n()) %>%
 
 hw_grid(h1, h2, h3, h4, h5, ncol = 5, rowheight = 600)
 
-```
+
 
 
 # Modelling 
+## test train split
+```{r caret split}
+set.seed(3456)
+trainIndex = createDataPartition(training$is_attributed, p = .95, list = F)
+dtrain = training[trainIndex, ]
+valid = training[-trainIndex, ]
 
-## Test train split
-```{r split}
-#time based split
-tr_index <- nrow(train)
-dtrain <- train %>% head(0.95 * tr_index) # 95% data for training
-valid <- train %>% tail(0.05 * tr_index) # 5% data for validation
-rm(train)
-cat("train size : ", dim(dtrain), " | valid size : ", dim(valid), " | test  size : ", dim(test))
+cat("train size : ", dim(dtrain), " | valid size : ", dim(valid), " | test  size : ", dim(testing))
+```
 
+# Preprocessing
+```{r preprocess}
 
 
 ```
 
+
 ```{r table}
 table(dtrain$is_attributed)
-
 ```
 
 ## Umbalancedness
@@ -195,13 +198,15 @@ table(dtrain$is_attributed)
 scale_pos_weight = 100 - ((220/100000)*100) # this will default in 50, as 50% of the data is positive
 scale_pos_weight = 1/0.002
 
+dtrain$weights = ifelse(dtrain$is_attributed == 0, 1, scale_pos_weight)
+
+head(dtrain)
 ```
 
 
 ## Categorical data
 - light gbm uses these without breaking into one-hot coding
 
-```{r categorical}
 categorical_features = c("app", "device", "os", "channel", "wday", "hour")
 
 dtrain = lgb.Dataset(data = as.matrix(dtrain[, colnames(dtrain)!= "is_attributed"]),
@@ -211,40 +216,32 @@ dtrain = lgb.Dataset(data = as.matrix(dtrain[, colnames(dtrain)!= "is_attributed
 dvalid = lgb.Dataset(data = as.matrix(valid[, colnames(valid)!= "is_attributed"]),
                      label = valid$is_attributed, 
                      categorical_feature = categorical_features)
+
+## trainControl
+```{r trainControl}
+fitControl = trainControl(##10-fold CV,
+        method = "repeatedcv",
+        number = 2,
+        repeats = 2)
+
+?gbm
+
+?train
 ```
 
-## Parameter tuning
-```{r parameters for tuning}
-params = list(objective = "binary", 
-              metric = "auc", 
-              learning_rate = 0.1,
-              num_leaves = 7,
-              max_depth = 3,
-              min_child_samples = 100, 
-              max_bin = 100,
-              subsample = 0.7,
-              subsample_freq = 1,
-              colsample_bytree = 0.7,
-              min_child_weight = 0,
-              min_split_gain = 0,
-              scale_pos_weight = scale_pos_weight)
 
-```
 
-## Train
-```{r train}
-tic("Total time for model training")
-model = lgb.train(params, dtrain, valids = list(validation = dvalid), nthread = 4,
-                  nrounds = 1000, verbose = 1, early_stopping_rounds = 50, eval_freq = 50)
+## GBM
+```{r gbm}
+tic("time for model tuning")
+gbmFit1 = train(is_attributed ~ ., data = dtrain,
+                method = "gbm",
+                metric = "ROC",
+                weights = weights,
+                tuneLength = 30,
+                trControl = fitControl,
+                verbose = F)
 toc()
-
-```
-
-
-```{r result}
-cat("Validation AUC @ best iter: ", 
-    max(unlist(model$record_evals[["validation"]][["auc"]][["eval"]])))
-
 ```
 
 
