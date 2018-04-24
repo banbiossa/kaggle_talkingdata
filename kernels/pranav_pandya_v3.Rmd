@@ -173,11 +173,11 @@ hw_grid(h1, h2, h3, h4, h5, ncol = 5, rowheight = 600)
 # Modelling 
 ```{r caret split}
 set.seed(3456)
-trainIndex = createDataPartition(training$is_attributed, p = .95, list = F)
-dtrain = training[trainIndex, ]
-valid = training[-trainIndex, ]
+trainIndex = createDataPartition(train$is_attributed, p = .95, list = F)
+dtrain = train[trainIndex, ]
+valid = train[-trainIndex, ]
 
-cat("train size : ", dim(dtrain), " | valid size : ", dim(valid), " | test  size : ", dim(testing))
+cat("train size : ", dim(dtrain), " | valid size : ", dim(valid), " | test  size : ", dim(test))
 ```
 
 
